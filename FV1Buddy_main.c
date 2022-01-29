@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <avr/eeprom.h>
 
-//#define CLK_PIN 6
+#define CLK_PIN 6
 #define PWM_PIN 3
 //#define TAP_PIN 6
 #define TAP_PIN 0
@@ -33,7 +33,7 @@ volatile uint16_t ledms;
 void IO_Init(void) 
 {
     //PWM & LED as outputs
-    PORTA.DIRSET |= (1 << PWM_PIN) | (1 << LED_PIN); //| (1<<CLK_PIN);
+    PORTA.DIRSET |= (1 << PWM_PIN) | (1 << LED_PIN) | (1<<CLK_PIN);
     //pull up for div switch & tap button
     PORTA_PIN0CTRL |= PORT_PULLUPEN_bm;
     //PORTA_PIN6CTRL |= PORT_PULLUPEN_bm;
