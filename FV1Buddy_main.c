@@ -30,7 +30,8 @@ volatile uint16_t pwm = 500;
 volatile uint16_t ms;
 volatile uint16_t ledms;
 
-void IO_Init(void) {
+void IO_Init(void) 
+{
     //PWM & LED as outputs
     PORTA.DIRSET |= (1 << PWM_PIN) | (1 << LED_PIN); //| (1<<CLK_PIN);
     //pull up for div switch & tap button
@@ -39,7 +40,8 @@ void IO_Init(void) {
     PORTA_PIN2CTRL |= PORT_PULLUPEN_bm;
 }
 
-void ADC_Config(void) {
+void ADC_Config(void) 
+{
     //freerunning mode, enable ADC
     ADC0.CTRLA |= ADC_FREERUN_bm | ADC_ENABLE_bm;
     //reference to VCC with the right sampling capacitor 
@@ -52,8 +54,10 @@ void ADC_Config(void) {
     ADC0.COMMAND |= ADC_STCONV_bm;
 }
 
-ISR(ADC0_RESRDY_vect) {
-    switch (ADC0.MUXPOS) {
+ISR(ADC0_RESRDY_vect) 
+{
+    switch (ADC0.MUXPOS) 
+    {
         case POT_PIN:
             pot = ADC0.RES;
             ADC0.MUXPOS = DIV_PIN;
@@ -70,9 +74,8 @@ ISR(ADC0_RESRDY_vect) {
     }
 }
 
-void TCA_Config(void) {
-    //Enable interrupts
-    sei();
+void TCA_Config(void) 
+{
     //Enable PWM output 0 (PA3), single slope PWM
     TCA0.SINGLE.CTRLB |= TCA_SINGLE_WGMODE_SINGLESLOPE_gc | TCA_SINGLE_CMP0EN_bm;
     //Set period to 1000 (20kHz for 20MHz clock)
@@ -84,11 +87,13 @@ void TCA_Config(void) {
     TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
 }
 
-ISR(TCA0_OVF_vect) {
+ISR(TCA0_OVF_vect) 
+{
     TCA0.SINGLE.CMP0BUF = pwm;
     static uint8_t count;
     count++;
-    if (count >= 20) {
+    if (count >= 20) 
+    {
         count = 0;
         ms++;
         ledms++;
@@ -98,7 +103,8 @@ ISR(TCA0_OVF_vect) {
     TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
 }
 
-void TCB_Config(void) {
+void TCB_Config(void) 
+{
     //8bit PWM Mode, enable output pin
     TCB0.CTRLB = TCB_CNTMODE_PWM8_gc | TCB_CCMPEN_bm;
     //Set period at 208 (10MHz/208 = 48 077Hz)
@@ -110,20 +116,29 @@ void TCB_Config(void) {
 }
 
 uint8_t debounce(void) {
-    if (!(PORTA.IN & (1 << TAP_PIN))) {
+    if (!(PORTA.IN & (1 << TAP_PIN))) 
+    {
         _delay_us(DEBOUNCE_TIME);
-        if (!(PORTA.IN & (1 << TAP_PIN))) {
+        
+        if (!(PORTA.IN & (1 << TAP_PIN))) 
+        {
             return (1);
-        } else {
+        } 
+        
+        else 
+        {
             return (0);
         }
     }
-    else {
+    
+    else 
+    {
         return (0);
     }
 }
 
-int main(void) {
+int main(void) 
+{
     //Unlocking protected registers and setting main clock to 20MHz
     CPU_CCP = CCP_IOREG_gc;
     CLKCTRL.MCLKCTRLB = 0;
@@ -148,7 +163,8 @@ int main(void) {
     TCB_Config();
     ADC_Config();
 
-    while (1) {
+    while (1) 
+    {
         //TIME POT
 
         if ((tap == 1 && abs(previouspot - pot) >= 15) || (timepresetactive == 1 && tap == 0 && abs(previouspot - pot) >= 15) || (timepresetactive == 0 && tap == 0 && abs(previouspot - pot) >= 1))//if pot move of more than 5%, changing to pot control
@@ -170,30 +186,36 @@ int main(void) {
         {
             if (debounce() == 0) //if tap button not pressed while changing 3 first div
             {
-                if (divsw <= 50) {
+                if (divsw <= 50) 
+                {
                     divmult = 1;
                 } //fourth
 
-                if (divsw > 50 && divsw < 230) {
+                if (divsw > 50 && divsw < 230) 
+                {
                     divmult = 0.75;
                 } //dotted eighth
 
-                if (divsw >= 230) {
+                if (divsw >= 230) 
+                {
                     divmult = 0.5;
                 } //eighth
             }
 
             if (debounce() == 1) //if tap button pressed while changing 3 last div
             {
-                if (divsw <= 50) {
+                if (divsw <= 50) 
+                {
                     divmult = 0.333333;
                 } //triplet
 
-                if (divsw > 50 && divsw < 230) {
+                if (divsw > 50 && divsw < 230) 
+                {
                     divmult = 0.25;
                 } //sixteenth
 
-                if (divsw >= 230) {
+                if (divsw >= 230) 
+                {
                     divmult = 0.1666666;
                 } //sextuplet
 
@@ -206,7 +228,8 @@ int main(void) {
             if (tap == 1) //if in tap control, update digital pot value
             {
                 divtempo = round(mstempo * divmult);
-                if (divtempo > delaymax) {
+                if (divtempo > delaymax) 
+                {
                     divtempo = delaymax;
                     mstempo = delaymax / divmult;
                 }
@@ -252,7 +275,8 @@ int main(void) {
 
         if (debounce() && laststate == 0 && nbtap != 0) //not first tap
         {
-            if (TCA0.SINGLE.CNT >= 500) {
+            if (TCA0.SINGLE.CNT >= 500) 
+            {
                 ms++;
             } //round up value if timer counter more than 500µs
 
@@ -266,7 +290,8 @@ int main(void) {
                 divtempo = round((divtempo + (ms * divmult)) / 2);
                 mstempo = round((mstempo + ms) / 2);
             }
-            if (divtempo > delaymax) {
+            if (divtempo > delaymax) 
+            {
                 divtempo = delaymax;
                 mstempo = delaymax / divmult;
             }
@@ -287,7 +312,8 @@ int main(void) {
             PORTA.OUTCLR = (1 << LED_PIN);
         }
 
-        if (tap == 1 && tapping == 0 && !debounce()) {
+        if (tap == 1 && tapping == 0 && !debounce()) 
+        {
             if (ledms >= divtempo - 4) //turns LED on every downbeat
             {
                 ledms = 0;
