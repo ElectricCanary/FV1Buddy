@@ -7,154 +7,136 @@
  *  support@electric-canary.com
  * 
  * This code is an ATtiny402 Tap Tempo & Clock for the Spin Semiconductors FV1 DSP
- * It can be calibrated for 400, 600, 800 & 1000ms delays.
+ * It can be calibrated for 700, 800, 900 & 1000ms delays.
  * 
  * Pinout:
  * 1: VDD
  * 2: 48kHz Clock Output
- * 3: LED Output
+ * 3: LED+ Output
  * 4: Time Potentiometer Analog Input
  * 5: Tempo Division Switch (On-Off-On) Analog Input
  * 6: Momentary Tap Tempo Button Input
- * 7: PWM Output to FV1
+ * 7: PWM Output
  * 8: GND
- * 
- * Recommended Fuses:
- * These fuses disable the programming pin of the ATtiny. 
- * You won't be able to program the µC again without a high voltage programmer.
- * 
- * pymcuprog commands:
- * 
  * 
  * This code is shared shared under a BY-NC-SA Creative Commons License
  * Go here for complete license : https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
  */
-
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #define F_CPU 20000000UL
 #include <util/delay.h>
 #include <avr/eeprom.h>
 #include <stdlib.h>
-#include <avr/eeprom.h>
 
 #define CLK_PIN 6
 #define PWM_PIN 3
-//#define TAP_PIN 6
 #define TAP_PIN 0
 #define LED_PIN 7
 #define POT_PIN 1
 #define DIV_PIN 2
 #define DEBOUNCE_TIME 900
-#define TAP_EEPROM 1
-#define TEMPO_EEPROM 2
-#define DELAYMAX_EEPROM 5
-#define PRESET1_SAVED 32
-#define PRESET2_SAVED 64
-#define PRESET1_TAP 33
-#define PRESET2_TAP 65
-#define PRESET1_DIV 35
-#define PRESET2_DIV 67
-#define PRESET1_TEMPO 39
-#define PRESET2_TEMPO 71
+#define EEPROM_TAP 0
+#define EEPROM_TEMPO 1
+#define EEPROM_DELAYMAX 3
 
 volatile uint16_t pot;
-volatile uint8_t divsw;
+volatile uint16_t divsw;
 volatile uint16_t pwm = 500;
 volatile uint16_t ms;
 volatile uint16_t ledms;
 
-void blink1(void)		//toggles led to verify interactions
+//This set of fuses will deactivate the reset, it will be impossible to reprogram the chip without high voltage programming
+FUSES = {
+	.WDTCFG = 0x00, // WDTCFG {PERIOD=OFF, WINDOW=OFF}
+	.BODCFG = 0x00, // BODCFG {SLEEP=DIS, ACTIVE=DIS, SAMPFREQ=1KHz, LVL=BODLEVEL0}
+	.OSCCFG = 0x02, // OSCCFG {FREQSEL=20MHZ, OSCLOCK=CLEAR}
+	.TCD0CFG = 0x00, // TCD0CFG {CMPA=CLEAR, CMPB=CLEAR, CMPC=CLEAR, CMPD=CLEAR, CMPAEN=CLEAR, CMPBEN=CLEAR, CMPCEN=CLEAR, CMPDEN=CLEAR}
+	.SYSCFG0 = 0xF2, // SYSCFG0 {EESAVE=CLEAR, RSTPINCFG=GPIO, CRCSRC=NOCRC}
+	.SYSCFG1 = 0x07, // SYSCFG1 {SUT=64MS}
+	.APPEND = 0x00, // APPEND {APPEND=User range:  0x0 - 0xFF}
+	.BOOTEND = 0x00, // BOOTEND {BOOTEND=User range:  0x0 - 0xFF}
+};
+
+void IO_Init(void)
 {
-	PORTA.OUTTGL = (1<<LED_PIN);
-	_delay_ms(150);
-	PORTA.OUTTGL = (1<<LED_PIN);
-	_delay_ms(150);
+  //PWM & LED as outputs
+  PORTA.DIRSET = (1<<PWM_PIN) | (1<<LED_PIN) | (1<<CLK_PIN);
+  //pull up for div switch & tap button
+  PORTA_PIN0CTRL |= PORT_PULLUPEN_bm;
+  PORTA_PIN2CTRL = PORT_ISC_INPUT_DISABLE_gc | PORT_PULLUPEN_bm;
+  PORTA_PIN1CTRL = PORT_ISC_INPUT_DISABLE_gc;
 }
 
-void fastblink1(void)		//toggles led to verify interactions
+void ADC_Config(void)
 {
-	PORTA.OUTTGL = (1<<LED_PIN);
-	_delay_ms(100);
-	PORTA.OUTTGL = (1<<LED_PIN);
-	_delay_ms(100);
+  //reference to VCC with the right sampling capacitor 
+  ADC0.CTRLC = ADC_SAMPCAP_bm | ADC_REFSEL_VDDREF_gc | ADC_PRESC_DIV32_gc;
+  //Start with ADC channel 1
+  ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc;
+  //enable result ready interrupt
+  ADC0.INTCTRL = ADC_RESRDY_bm;
+  //10bits freerun & enable
+  ADC0.CTRLA |= ADC_ENABLE_bm | ADC_RESSEL_10BIT_gc | ADC_FREERUN_bm;
+  //Start conversion
+  ADC0.COMMAND = ADC_STCONV_bm;
 }
 
-
-void IO_Init(void) 
+ISR(ADC0_RESRDY_vect)
 {
-    //PWM & LED as outputs
-    PORTA.DIRSET |= (1 << PWM_PIN) | (1 << LED_PIN) | (1<<CLK_PIN);
-    //pull up for div switch & tap button
-    PORTA_PIN0CTRL |= PORT_PULLUPEN_bm;
-    //PORTA_PIN6CTRL |= PORT_PULLUPEN_bm;
-    PORTA_PIN2CTRL |= PORT_PULLUPEN_bm;
+  switch(ADC0.MUXPOS)
+  {
+    case ADC_MUXPOS_AIN1_gc:
+        divsw = ADC0.RES;
+        ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc;
+    break;
+    
+    case ADC_MUXPOS_AIN2_gc:
+        pot = ADC0.RES;
+        ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc;
+    break;
+    
+    default:
+        ADC0.MUXPOS = ADC_MUXPOS_AIN1_gc;
+    break;
+  }
+    ADC0.INTFLAGS = ADC_RESRDY_bm;
 }
 
-void ADC_Config(void) 
+//ms timer for tap tempo
+void TCA_Config(void)
 {
-    //freerunning mode, enable ADC
-    ADC0.CTRLA |= ADC_FREERUN_bm | ADC_ENABLE_bm;
-    //reference to VCC with the right sampling capacitor 
-    ADC0.CTRLC |= ADC_SAMPCAP_bm | ADC_REFSEL0_bm;
-    //Start with ADC channel 1
-    ADC0.MUXPOS = POT_PIN;
-    //enable result ready interrupt
-    ADC0.INTCTRL |= ADC_RESRDY_bm;
-    //Start conversion
-    ADC0.COMMAND |= ADC_STCONV_bm;
+  //Enable interrupts
+  sei();
+  //Enable PWM output 0 (PA3), single slope PWM
+  TCA0.SINGLE.CTRLB |= TCA_SINGLE_WGMODE_SINGLESLOPE_gc | TCA_SINGLE_CMP0EN_bm;
+  //Set period to 1000 (20kHz for 20MHz clock)
+  TCA0.SINGLE.PER = 999;
+  TCA0.SINGLE.CMP0 = 500; 
+  //Enable overflow interrupt
+  TCA0.SINGLE.INTCTRL |= TCA_SINGLE_OVF_bm;
+  //Enable timer
+  TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
 }
 
-ISR(ADC0_RESRDY_vect) 
+ISR(TCA0_OVF_vect)
 {
-    switch (ADC0.MUXPOS) 
-    {
-        case POT_PIN:
-            pot = ADC0.RES;
-            ADC0.MUXPOS = DIV_PIN;
-            break;
-
-        case DIV_PIN:
-            divsw = ADC0.RESH;
-            ADC0.MUXPOS = POT_PIN;
-            break;
-
-        default:
-            ADC0.MUXPOS = POT_PIN;
-            break;
-    }
+  TCA0.SINGLE.CMP0BUF = pwm;
+  static uint8_t count;
+  count++;
+  if (count >= 20)
+  {
+    count = 0;
+    ms++;
+    ledms++;
+  }
+  
+  //Clear interrupt flag
+  TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
 }
 
-void TCA_Config(void) 
-{
-    //Enable PWM output 0 (PA3), single slope PWM
-    TCA0.SINGLE.CTRLB |= TCA_SINGLE_WGMODE_SINGLESLOPE_gc | TCA_SINGLE_CMP0EN_bm;
-    //Set period to 1000 (20kHz for 20MHz clock)
-    TCA0.SINGLE.PER = 999;
-    TCA0.SINGLE.CMP0 = 500;
-    //Enable overflow interrupt
-    TCA0.SINGLE.INTCTRL |= TCA_SINGLE_OVF_bm;
-    //Enable timer
-    TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
-}
-
-ISR(TCA0_OVF_vect) 
-{
-    TCA0.SINGLE.CMP0BUF = pwm;
-    static uint8_t count;
-    count++;
-    if (count >= 20) 
-    {
-        count = 0;
-        ms++;
-        ledms++;
-    }
-
-    //Clear interrupt flag
-    TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
-}
-
-void TCB_Config(void) 
+//48kHz Timer for FV-1
+void TCB_Config(void)
 {
     //8bit PWM Mode, enable output pin
     TCB0.CTRLB = TCB_CNTMODE_PWM8_gc | TCB_CCMPEN_bm;
@@ -166,339 +148,277 @@ void TCB_Config(void)
     TCB0.CTRLA = TCB_CLKSEL0_bm | TCB_ENABLE_bm;
 }
 
-uint8_t debounce(void) {
-    if (!(PORTA.IN & (1 << TAP_PIN))) 
+uint8_t debounce(void)
+{
+    if (!(PORTA.IN & (1<<TAP_PIN)))
     {
         _delay_us(DEBOUNCE_TIME);
-        
-        if (!(PORTA.IN & (1 << TAP_PIN))) 
+        if (!(PORTA.IN & (1<<TAP_PIN)))
         {
-            return (1);
-        } 
-        
-        else 
+            return(1);
+        }
+        else
         {
-            return (0);
+            return(0);
         }
     }
     
-    else 
+    else
     {
-        return (0);
+        return(0);
     }
 }
 
-int main(void) 
+void blink(void)
 {
-    //Unlocking protected registers and setting main clock to 20MHz
-    CPU_CCP = CCP_IOREG_gc;
-    CLKCTRL.MCLKCTRLB = 0;
-    CLKCTRL.MCLKLOCK |= CLKCTRL_LOCKEN_bm;
+    PORTA.OUTTGL = (1<<LED_PIN);
+    _delay_ms(150);
+    PORTA.OUTTGL = (1<<LED_PIN);
+    _delay_ms(150);
+}
 
-    uint8_t tap = eeprom_read_byte((uint8_t*) TAP_EEPROM); //1 for tap tempo control, 0 for pot control
-    uint8_t laststate = 0; //laststate of tap button
-    uint8_t nbtap = 0; //number of taps
-    uint8_t tapping = 0; //1 if user is currently tapping
-    uint16_t mstempo = eeprom_read_word((uint16_t*) TEMPO_EEPROM); //Current tempo in ms
-    uint16_t divtempo; //Current tempo in ms multiplied by divmult
-    float divmult = 1; //Multiplier for tempo division
-    uint16_t delaymax = eeprom_read_word((uint16_t*) DELAYMAX_EEPROM); //Maximum delay in ms allowed
-    uint16_t previousdiv = 300;
-    uint16_t previouspot;
-    uint8_t timepresetactive = 0;
-
-    //enable interrupts
-    sei();
-    IO_Init();
-    TCA_Config();
-    TCB_Config();
-    ADC_Config();
-
-    //--------CALIBRATION 
-
-	if (debounce())
-	{
-        _delay_ms(1000);
-        if (debounce())
-        {
-            delaymax = (floor(pot/256)*200) + 400;
-            eeprom_update_word((uint16_t*) DELAYMAX_EEPROM, delaymax);
-            eeprom_update_byte((uint8_t *)PRESET1_SAVED, 0);
-            eeprom_update_byte((uint8_t *)PRESET2_SAVED, 0);
-            PORTA.OUTCLR = (1<<LED_PIN);
-            fastblink1();
-            fastblink1();
-        }
-	}
-    
-    while (1) 
+uint16_t calib(void)
+{
+    if (debounce())
     {
-        //TIME POT
-
-        if ((tap == 1 && abs(previouspot - pot) >= 15) || (timepresetactive == 1 && tap == 0 && abs(previouspot - pot) >= 15) || (timepresetactive == 0 && tap == 0 && abs(previouspot - pot) >= 1))//if pot move of more than 5%, changing to pot control
-        {
-            mstempo = round((pot*delaymax)/1023);
-            pwm = mstempo - 1;
-
-            previouspot = pot;
-            timepresetactive = 0;
-            tap = 0;
-            TCA0.SINGLE.CNT = 0;
-        }
-        
-        if (tap == 0 && ms >= 65000)
+        PORTA.OUTCLR = (1<<LED_PIN);
+        blink();
+        for (uint16_t c = 0; c < 4000; c++ )
 		{
-			eeprom_update_byte((uint8_t*)TAP_EEPROM, 0);
-			eeprom_update_word((uint16_t*)TEMPO_EEPROM, mstempo);
-		}
+            _delay_ms(1);
+            
+            if (!debounce())
+            {
+                return(((pot>>8)+7)*100);
+                blink();
+                blink();
+            }
+        }
+    }
+    
+    else
+    {
+        if(eeprom_read_word((uint16_t*)EEPROM_DELAYMAX) > 1000)
+        {
+            eeprom_update_word((uint16_t*)EEPROM_DELAYMAX,1000);
+            return(1000);
+        }
+        else
+        {
+            return(eeprom_read_word((uint16_t*)EEPROM_DELAYMAX));
+        }
+    }
+}
 
+int main(void)
+{
+  //Unlocking protected registers and setting main clock to 20MHz
+  CPU_CCP = CCP_IOREG_gc;
+  CLKCTRL.MCLKCTRLB = 0;
+  CLKCTRL.MCLKLOCK |= CLKCTRL_LOCKEN_bm;
+  
+  uint8_t tap = eeprom_read_byte((uint8_t*)EEPROM_TAP); //1 for tap tempo control, 0 for pot control
+  uint8_t laststate = 0; //laststate of tap button
+  uint8_t nbtap = 0; //number of taps
+  uint8_t tapping = 0; //1 if user is currently tapping
+  uint16_t mstempo = eeprom_read_word((uint16_t*)EEPROM_TEMPO); //Current tempo in ms
+  uint16_t divtempo = 500; //Current tempo in ms multiplied by divmult
+  float divmult = 1; //Multiplier for tempo division
+  uint16_t previousdiv = 60000;
+  uint16_t previouspot;
+  uint8_t updown;
+  
+  //enable interrupts
+  sei();
+  IO_Init();
+  TCA_Config();
+  TCB_Config();
+  ADC_Config();
+  uint16_t delaymax = calib(); //Maximum delay in ms allowed
+  
+  if (tap == 1)
+  {
+      previouspot = pot;
+  }
+  else
+  {
+      previouspot = 60000;
+  }
+  
+  _delay_ms(500);
+  
+    while (1)
+    {
         //TEMPO DIV
-
-        if (abs(previousdiv - divsw) > 50) //if first time or if div toggle changed position : update div
-        {
-            if (debounce() == 0) //if tap button not pressed while changing 3 first div
-            {
-                if (divsw <= 50) 
-                {
-                    divmult = 1;
-                } //fourth
-
-                if (divsw > 50 && divsw < 230) 
-                {
-                    divmult = 0.75;
-                } //dotted eighth
-
-                if (divsw >= 230) 
-                {
-                    divmult = 0.5;
-                } //eighth
-            }
-
-            if (debounce() == 1) //if tap button pressed while changing 3 last div
-            {
-                if (divsw <= 50) 
-                {
-                    divmult = 0.333333;
-                } //triplet
-
-                if (divsw > 50 && divsw < 230) 
-                {
-                    divmult = 0.25;
-                } //sixteenth
-
-                if (divsw >= 230) 
-                {
-                    divmult = 0.1666666;
-                } //sextuplet
-
-                nbtap = 0; //don't count press as tap
-                tapping = 0;
-                ms = 0;
-                laststate = 1;
-            }
-
-            if (tap == 1) //if in tap control, update digital pot value
-            {
-                divtempo = round(mstempo * divmult);
-                if (divtempo > delaymax) 
-                {
-                    divtempo = delaymax;
-                    mstempo = delaymax / divmult;
-                }
-                pwm = divtempo;
-            }
-
-            ledms = 0;
-            previousdiv = divsw; //reseting previousdiv to detect next move
-        }
-
-        //TAP TEMPO
-
-        if (debounce() && laststate == 0 && nbtap == 0) //first tap
-        {
-            TCA0.SINGLE.CNT = 0; //starts counting
-            ms = 0;
-            nbtap++;
-            laststate = 1;
-            tapping = 1;
-        }
-
-        if (nbtap > 1 && ms > (3 * mstempo) && !debounce() && laststate == 0) //if too long between taps  : resets
-        {
-            ms = 0;
-            nbtap = 0;
-            tapping = 0;
-        }
-
-        if (nbtap == 1 && ms > ((delaymax / divmult) + 800) && !debounce() && laststate == 0) //if tapped only once, reset once the max tempo for the div + 800ms passed
-        {
-            ms = 0;
-            nbtap = 0;
-            tapping = 0;
-            eeprom_update_word((uint16_t*) TEMPO_EEPROM, mstempo);
-            eeprom_update_byte((uint8_t*) TAP_EEPROM, 1);
-        }
-
-        if (!debounce() && laststate == 1) //release tap button
-        {
-            laststate = 0;
-            PORTA.OUTCLR = (1 << LED_PIN);
-        }
-
-        if (debounce() && laststate == 0 && nbtap != 0) //not first tap
-        {
-            if (TCA0.SINGLE.CNT >= 500) 
-            {
-                ms++;
-            } //round up value if timer counter more than 500µs
-
-            if (nbtap == 1) //if second tap, tempo = time elapsed between the 2 button press
-            {
-                divtempo = ms * divmult;
-            }
-            else //if not second tap, average every tap
-            {
-                divtempo = round((divtempo + (ms * divmult)) / 2);
-            }
-            if (divtempo > delaymax) 
-            {
-                divtempo = delaymax;
-            }
-            mstempo = round(divtempo / divmult);
-            pwm = divtempo - 1;
-
-            nbtap++; //updating number of tap and last state of tap button
-            laststate = 1;
-            TCA0.SINGLE.CNT = 0; //reseting counter and ms
-            ms = 0;
-            ledms = 0;
-            tap = 1; //now in tap control mode
-            PORTA.OUTSET = (1 << LED_PIN);
-        }
-
-        //---------LED CONTROL
-        if (tapping == 1 && nbtap == 1 && laststate == 1)//keep the light off when long button press
-        {
-            PORTA.OUTCLR = (1 << LED_PIN);
-        }
-
-        if (tap == 1 && tapping == 0 && !debounce()) 
-        {
-            if (ledms >= divtempo - 4) //turns LED on every downbeat
-            {
-                ledms = 0;
-                PORTA.OUTSET = (1 << LED_PIN);
-            }
-
-            if (ledms >= 8) //turns LED off 4ms after downbeat
-            {
-                PORTA.OUTCLR = (1 << LED_PIN);
-            }
-        }
-        
-        //-----------PRESETS RECALL & SAVE
-		
-		/*if (debounce()==1 && ms >= 3000 && laststate==1)	//if button pressed more than 3s
+        if (abs(previousdiv - divsw) > 300)		//if first time or if div toggle changed position : update div
 		{
-			PORTA.OUTCLR = (1<<LED_PIN);
-			blink1();
-			for (uint16_t y=0; y<=1300;y++)	//wait for button release
+			if (debounce() == 0)	//if tap button not pressed while changing 3 first div
 			{
-				_delay_ms(1);
-				if (debounce()==0)
-				{
-					if (eeprom_read_byte((uint8_t *)PRESET1_SAVED)==1)	//if button released recall preset one (if it has already been saved)
-					{
-						tap = eeprom_read_byte((uint8_t *)PRESET1_TAP);
-						divmult = eeprom_read_float((float *)PRESET1_DIV);
-						mstempo = eeprom_read_word((uint16_t *)PRESET1_TEMPO);
-						divtempo = (uint16_t) round(mstempo * divmult);
-                        pwm = divtempo-1;
-						timepresetactive = 1;
-					}
-					_delay_ms(150);
-					fastblink1();
-					_delay_ms(150);
-					break;
-				}
+				if (divsw <= 100){divmult = 1;}	//fourth
+			
+				if (divsw > 101 && divsw < 900){divmult = 0.75;}	//dotted eighth
+				
+				if (divsw >= 900){divmult = 0.5;}	//eighth
 			}
-			if (debounce()==1)	//if button still not released
+			
+			if (debounce() == 1)	//if tap button pressed while changing 3 last div
 			{
-				blink1();
-				blink1();
-				for (uint16_t y=0; y<=1300;y++)	//wait for button release
-				{
-					_delay_ms(1);
-					if (debounce()==0)	//if button released recall preset 2
-					{
-						if (eeprom_read_byte((uint8_t *)PRESET2_SAVED)==1)	//(recall only if preset 2 has previously been saved)
-						{
-							tap = eeprom_read_byte((uint8_t *)PRESET2_TAP);
-							divmult = eeprom_read_float((float *)PRESET2_DIV);
-							mstempo = eeprom_read_word((uint16_t *)PRESET2_TEMPO);
-							divtempo = (uint16_t) round(mstempo * divmult);
-                            pwm = divtempo-1;
-							timepresetactive = 1;
-						}
-						_delay_ms(150);
-						fastblink1();
-						fastblink1();
-						_delay_ms(150);
-						break;
-						}
-					}
-					if (debounce()==1)	//if button still pressed
-					{
-						PORTA.OUTSET = (1<<LED_PIN);	//reverse blink (writing mode)
-						_delay_ms(500);
-						blink1();
-						for (uint16_t y=0; y<=1300;y++)	//wait for button release
-						{
-							_delay_ms(1);
-							if (debounce()==0)	//if button released save preset 1
-							{
-								eeprom_update_byte((uint8_t *)PRESET1_SAVED, 1);
-								eeprom_update_byte((uint8_t *)PRESET1_TAP, tap);
-								eeprom_update_float((float *)PRESET1_DIV, divmult);
-								eeprom_update_word((uint16_t *)PRESET1_TEMPO, mstempo);
-								_delay_ms(150);
-								fastblink1();
-								_delay_ms(150);
-								break;
-							}
-						}
-						if (debounce()==1)	//if button still not released
-						{
-							blink1();
-							blink1();
-							for (uint16_t y=0; y<=1300;y++)	//wait for button release
-							{
-								_delay_ms(1);
-								if (debounce()==0)	//if button released save preset 2
-								{
-									eeprom_update_byte((uint8_t *)PRESET2_SAVED, 1);
-									eeprom_update_byte((uint8_t *)PRESET2_TAP, tap);
-									eeprom_update_float((float *)PRESET2_DIV, divmult);
-									eeprom_update_word((uint16_t *)PRESET2_TEMPO, mstempo);
-									_delay_ms(150);
-									fastblink1();
-									fastblink1();
-									_delay_ms(150);
-									break;
-								}
-							}
-							if (debounce()==1)
-							{
-								fastblink1();
-								fastblink1();
-								fastblink1();
-							}
-						}
-					}
-				}
-			ms = 0;	//reset tap sequence since this press is not to set tempo
+				if (divsw <= 100){divmult = 0.333333;}	//triplet
+				
+				if (divsw > 101 && divsw < 900){divmult = 0.25;}	//sixteenth
+				
+				if (divsw >= 900){divmult = 0.1666666;}	//sextuplet
+				
+				nbtap = 0;			//don't count press as tap
+				tapping = 0;
+				ms = 0;
+				laststate = 1;
+			}
+			
+			if (tap == 1)	//if in tap control, update digital pot value
+			{
+				divtempo = round(mstempo * divmult);
+				pwm = divtempo;
+			}
+			
+			ledms = 0;
+			previousdiv = divsw;	//reseting previousdiv to detect next move
+		}
+        
+        //TIME POT
+        
+        if ((tap == 1 && abs(previouspot-pot) >= 72) || (tap == 0 && abs(previouspot-pot) >= 1))//if pot move of more than 7%, changing to pot control
+		{
+			pwm = pot * (0x3FF/delaymax);
+			previouspot = pot;
+			tap = 0;
+            eeprom_update_byte((uint8_t*)EEPROM_TAP,0);
+		}
+        
+        //TAP TEMPO
+        
+        if (debounce() && laststate==0 && nbtap==0) //first tap
+		{
+			TCA0.SINGLE.CNT = 0;			//starts counting
+			ms=0;
+			nbtap++;
+			laststate = 1;
+			tapping = 1;
+		}
+		
+		if (nbtap > 1 && ms > (3*mstempo) && !debounce() && laststate==0) //if too long between taps  : resets
+		{
+			ms = 0;
 			nbtap = 0;
 			tapping = 0;
-		}*/
+            eeprom_update_byte((uint8_t*)EEPROM_TAP,1);
+            eeprom_update_word((uint16_t*)EEPROM_TEMPO,mstempo);
+		}
+		
+		if (nbtap == 1 && ms > ((delaymax/divmult) + 800) && !debounce() && laststate==0) //if tapped only once, reset once the max tempo for the div + 800ms passed
+		{
+			ms = 0;
+			nbtap = 0;
+			tapping = 0;
+		}
+		
+		if (!debounce() && laststate ==1)	//release tap button
+		{
+			laststate = 0;
+			PORTA.OUTCLR = (1<<LED_PIN);
+		}
+		
+		if (debounce() && laststate==0 && nbtap!=0) //not first tap
+		{
+			if (TCA0.SINGLE.CNT >= 500){ms++;}	//round up value if timer counter more than 500µs
+			
+			if (nbtap == 1)		//if second tap, tempo = time elapsed between the 2 button press
+			{
+				divtempo = ms * divmult;
+				mstempo = ms;
+			}
+			
+			else		//if not second tap, average every tap
+			{
+				divtempo = (divtempo + (ms*divmult)) / 2;
+				mstempo = (mstempo + ms)/2;
+			}
+            
+            pwm = divtempo;
+            
+			nbtap++;			//updating number of tap and last state of tap button
+			laststate = 1;
+			TCA0.SINGLE.CNT = 0;			//reseting counter and ms
+			ms = 0;
+			ledms = 0;
+			tap = 1;			//now in tap control mode
+			PORTA.OUTSET = (1<<LED_PIN);
+		}
+        
+        // RAMP
+        if (debounce() && ms >= 2000 && laststate==1)	//if button pressed more than 2.5s
+		{
+            while (debounce())
+            {
+                if(updown == 0)
+                {
+                    divtempo += 1;
+                }
+                
+                else
+                {
+                    divtempo -= 1;
+                }
+                
+                pwm = divtempo;
+                
+                if (divtempo == 0 || divtempo == delaymax) 
+                {
+                    updown ^= 1;
+                }
+                
+                for (uint16_t i = 0; i < pot; i++)
+                {
+                    _delay_us(1);
+                }
+            }
+            if (tap == 1)
+            {
+                divtempo = mstempo * divmult;
+                pwm = divtempo;
+            }
+			else
+            {
+                pwm = pot * (0x3FF/delaymax);
+            }
+            updown = 0;
+            previouspot = pot;
+        }
+        
+        //---------LED CONTROL
+        if (tap != 1 && tapping == 0)
+        {
+            PORTA.OUTSET = (1<<LED_PIN);
+        }
+        
+        if (tapping == 1 && nbtap == 1 && laststate == 1)//keep the light off when long button press
+        {
+            PORTA.OUTCLR = (1<<LED_PIN);
+        }	
+        
+		if (tap == 1 && tapping == 0 && !debounce())
+		{	
+			if (ledms >= divtempo - 4)	//turns LED on every downbeat
+			{
+				ledms = 0;
+				PORTA.OUTSET = (1<<LED_PIN);
+			}
+		
+			if (ledms >= 8)			//turns LED off 4ms after downbeat
+			{
+				PORTA.OUTCLR = (1<<LED_PIN);
+			}
+		}
     }
 }
+
