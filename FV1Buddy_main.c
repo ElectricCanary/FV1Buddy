@@ -1,4 +1,4 @@
-/*
+/* 
  * FV1 Buddy
  * January 2022
  * by Antoine Ricoux for Electric Canary
@@ -72,6 +72,7 @@ void ADC_Config(void)
 {
   //reference to VCC with the right sampling capacitor 
   ADC0.CTRLC = ADC_SAMPCAP_bm | ADC_REFSEL_VDDREF_gc | ADC_PRESC_DIV32_gc;
+  //ADC0.CTRLB = ADC_SAMPNUM_ACC32_gc;
   //Start with ADC channel 1
   ADC0.MUXPOS = ADC_MUXPOS_AIN2_gc;
   //enable result ready interrupt
@@ -181,7 +182,9 @@ uint16_t calib(void)
 {
     if (debounce())
     {
+        _delay_ms(5000);
         PORTA.OUTCLR = (1<<LED_PIN);
+        blink();
         blink();
         for (uint16_t c = 0; c < 4000; c++ )
 		{
@@ -189,9 +192,9 @@ uint16_t calib(void)
             
             if (!debounce())
             {
+                blink();
+                blink();
                 return(((pot>>8)+7)*100);
-                blink();
-                blink();
             }
         }
     }
@@ -275,7 +278,7 @@ int main(void)
 				laststate = 1;
 			}
 			
-			if (tap == 1)	//if in tap control, update digital pot value
+			if (tap == 1)	//if in tap control, update pwm value
 			{
 				divtempo = round(mstempo * divmult);
 				pwm = divtempo;
@@ -286,8 +289,8 @@ int main(void)
 		}
         
         //TIME POT
-        
-        if ((tap == 1 && abs(previouspot-pot) >= 72) || (tap == 0 && abs(previouspot-pot) >= 1))//if pot move of more than 7%, changing to pot control
+        //if pot move of more than 7%, changing to pot control
+        if ((tap == 1 && tapping == 0 && abs(previouspot-pot) >= 72) || (tap == 0 && tapping == 0 && abs(previouspot-pot) >= 1))
 		{
 			pwm = pot * (0x3FF/delaymax);
 			previouspot = pot;
@@ -305,14 +308,21 @@ int main(void)
 			laststate = 1;
 			tapping = 1;
 		}
-		
-		if (nbtap > 1 && ms > (3*mstempo) && !debounce() && laststate==0) //if too long between taps  : resets
+        
+		if (nbtap > 1 && !debounce() && laststate==0) //if too long between taps  : resets
 		{
-			ms = 0;
-			nbtap = 0;
-			tapping = 0;
-            eeprom_update_byte((uint8_t*)EEPROM_TAP,1);
-            eeprom_update_word((uint16_t*)EEPROM_TEMPO,mstempo);
+            if (ms > (1.5*mstempo))
+            {
+                eeprom_update_byte((uint8_t*)EEPROM_TAP,1);
+                eeprom_update_word((uint16_t*)EEPROM_TEMPO,mstempo);
+            }
+            
+            if (ms > (3*mstempo))
+            {
+                ms = 0;
+                nbtap = 0;
+                tapping = 0;
+            }
 		}
 		
 		if (nbtap == 1 && ms > ((delaymax/divmult) + 800) && !debounce() && laststate==0) //if tapped only once, reset once the max tempo for the div + 800ms passed
@@ -322,13 +332,15 @@ int main(void)
 			tapping = 0;
 		}
 		
-		if (!debounce() && laststate ==1)	//release tap button
+		if (!debounce() && laststate == 1)	//release tap button
 		{
 			laststate = 0;
 			PORTA.OUTCLR = (1<<LED_PIN);
+            previouspot = pot;
+            previousdiv = divsw;
 		}
 		
-		if (debounce() && laststate==0 && nbtap!=0) //not first tap
+		if (debounce() && laststate==0 && nbtap!=0 && ms >= 100) //not first tap
 		{
 			if (TCA0.SINGLE.CNT >= 500){ms++;}	//round up value if timer counter more than 500µs
 			
@@ -346,17 +358,17 @@ int main(void)
             
             pwm = divtempo;
             
-			nbtap++;			//updating number of tap and last state of tap button
+			nbtap++;                //updating number of tap and last state of tap button
 			laststate = 1;
-			TCA0.SINGLE.CNT = 0;			//reseting counter and ms
+			TCA0.SINGLE.CNT = 0;    //reseting counter and ms
 			ms = 0;
 			ledms = 0;
-			tap = 1;			//now in tap control mode
+			tap = 1;                //now in tap control mode
 			PORTA.OUTSET = (1<<LED_PIN);
 		}
         
         // RAMP
-        if (debounce() && ms >= 2000 && laststate==1)	//if button pressed more than 2.5s
+        if (debounce() && ms >= 2000 && laststate==1)	//if button pressed more than 2s
 		{
             while (debounce())
             {
@@ -375,6 +387,7 @@ int main(void)
                 if (divtempo == 0 || divtempo == delaymax) 
                 {
                     updown ^= 1;
+                    PORTA.OUTTGL = (1<<LED_PIN);
                 }
                 
                 for (uint16_t i = 0; i < pot; i++)
@@ -408,7 +421,7 @@ int main(void)
         
 		if (tap == 1 && tapping == 0 && !debounce())
 		{	
-			if (ledms >= divtempo - 4)	//turns LED on every downbeat
+			if (ledms >= mstempo - 4)	//turns LED on every downbeat
 			{
 				ledms = 0;
 				PORTA.OUTSET = (1<<LED_PIN);
@@ -421,4 +434,3 @@ int main(void)
 		}
     }
 }
-
