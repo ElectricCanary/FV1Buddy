@@ -1,5 +1,7 @@
 # FV1Buddy
 
+THIS PROJECT IS ONLY PARTIALLY WORKING FOR NOW
+
 The FV1Buddy is a Tap Tempo & Clock Module for the Spin Semiconductor FV1 DSP.
 
 You'll find the main code in C, the compiled hex, a datasheet and Altium & Eagle libraries.
