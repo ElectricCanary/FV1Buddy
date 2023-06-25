@@ -1,0 +1,58 @@
+Protel Design System Design Rule Check
+PCB File : C:\Users\Public\Documents\Altium\Projects\FV1Buddy\FV1Buddy.PcbDoc
+Date     : 20/06/2022
+Time     : 20:30:15
+
+Processing Rule : Clearance Constraint (Gap=0.254mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Short-Circuit Constraint (Allowed=No) (All),(All)
+Rule Violations :0
+
+Processing Rule : Un-Routed Net Constraint ( (All) )
+Rule Violations :0
+
+Processing Rule : Modified Polygon (Allow modified: No), (Allow shelved: No)
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=0.127mm) (Max=0.4mm) (Preferred=0.254mm) (All)
+Rule Violations :0
+
+Processing Rule : Power Plane Connect Rule(Direct Connect )(Expansion=0.508mm) (Conductor Width=0.254mm) (Air Gap=0.254mm) (Entries=4) (All)
+Rule Violations :0
+
+Processing Rule : Hole Size Constraint (Min=0.025mm) (Max=2.54mm) (All)
+Rule Violations :0
+
+Processing Rule : Hole To Hole Clearance (Gap=0.254mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Minimum Solder Mask Sliver (Gap=0.2mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Silk To Solder Mask (Clearance=0.254mm) (IsPad),(All)
+Rule Violations :0
+
+Processing Rule : Silk to Silk (Clearance=0.1mm) (All),(All)
+Rule Violations :0
+
+Processing Rule : Net Antennae (Tolerance=0mm) (All)
+Rule Violations :0
+
+Processing Rule : Board Clearance Constraint (Gap=0mm) (All)
+Rule Violations :0
+
+Processing Rule : Height Constraint (Min=0mm) (Max=25.4mm) (Prefered=12.7mm) (All)
+Rule Violations :0
+
+Waived Violations Of Rule : Minimum Solder Mask Sliver (Gap=0.2mm) (All),(All)
+   Waived Violation between Minimum Solder Mask Sliver Constraint: (0.188mm < 0.2mm) Between Pad C1-1(1.55mm,0.99mm) on Top Layer And Pad P1-1(0mm,0mm) on Multi-Layer [Top Solder] Mask Sliver [0.188mm]Waived by Antoine Ricoux at 19/06/2022 18:30:35
+   Waived Violation between Minimum Solder Mask Sliver Constraint: (0.175mm < 0.2mm) Between Pad C3-1(4.55mm,-0.41mm) on Top Layer And Pad U1-6(4.445mm,-1.81mm) on Top Layer [Top Solder] Mask Sliver [0.175mm]Waived by Antoine Ricoux at 19/06/2022 18:30:35
+   Waived Violation between Minimum Solder Mask Sliver Constraint: (0.175mm < 0.2mm) Between Pad C3-2(6.05mm,-0.41mm) on Top Layer And Pad U1-5(5.715mm,-1.81mm) on Top Layer [Top Solder] Mask Sliver [0.175mm]Waived by Antoine Ricoux at 19/06/2022 18:30:35
+   Waived Violation between Minimum Solder Mask Sliver Constraint: (0.181mm < 0.2mm) Between Pad P1-4(0mm,-7.62mm) on Multi-Layer And Pad R3-2(1.375mm,-8.41mm) on Top Layer [Top Solder] Mask Sliver [0.181mm]Waived by Antoine Ricoux at 19/06/2022 18:30:35
+Waived Violations :4
+
+
+Violations Detected : 0
+Waived Violations : 4
+Time Elapsed        : 00:00:02
